@@ -151,7 +151,7 @@
       <id>local-front-end</id>
       <properties>
         <jetty.port>8082</jetty.port>
-        <tds.path>http://tds.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
+        <tds.path>http://app.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
         <tdm.host>tdm.dev.obanyc.com</tdm.host>
         <log4j.appender>stdout</log4j.appender>
         <log4j.hibernate.sql>OFF</log4j.hibernate.sql>
@@ -166,7 +166,7 @@
       <!-- aka staging, production -->
       <properties>
         <jetty.port>8085</jetty.port>
-        <tds.path>http://tds.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
+        <tds.path>http://app.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
         <tdm.host>tdm.dev.obanyc.com</tdm.host>
         <log4j.appender>stdout</log4j.appender>
         <log4j.hibernate.sql>OFF</log4j.hibernate.sql>
@@ -178,7 +178,7 @@
       <!-- aka services-vtw-as-tds -->
       <!-- single port, aka development -->
       <properties>
-        <tds.path>http://tds.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
+        <tds.path>http://app.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
         <tdm.host>tdm.dev.obanyc.com</tdm.host>
         <log4j.appender>stdout</log4j.appender>
         <log4j.hibernate.sql>OFF</log4j.hibernate.sql>
@@ -191,7 +191,7 @@
       <!-- multi port, also for development -->
       <properties>
         <jetty.port>8082</jetty.port>
-        <tds.path>http://tds.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
+        <tds.path>http://app.dev.obanyc.com:8080/onebusaway-nyc-transit-data-federation-webapp</tds.path>
         <tdm.host>tdm.dev.obanyc.com</tdm.host>
         <log4j.appender>stdout</log4j.appender>
         <log4j.hibernate.sql>OFF</log4j.hibernate.sql>
