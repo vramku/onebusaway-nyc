@@ -26,7 +26,6 @@ package org.onebusaway.nyc.report.model;
 
 import org.onebusaway.nyc.transit_data.model.NycQueuedInferredLocationBean;
 import org.onebusaway.nyc.transit_data.model.NycVehicleManagementStatusBean;
-
 import org.hibernate.annotations.AccessType;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
@@ -42,7 +41,6 @@ import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 import javax.persistence.Table;
-import javax.persistence.Transient;
 
 @Entity
 @Table(name = "obanyc_inferredlocation")
@@ -160,8 +158,7 @@ public class ArchivedInferredLocationRecord implements Serializable {
   @Column(nullable = true, name = "assigned_run_id", length = 16)
   private String assignedRunId = null;
 
-  //@Column(nullable = true, name = "assigned_block_id", length = 32)
-  @Transient
+  @Column(nullable = true, name = "assigned_block_id", length = 32)
   private String assignedBlockId = null;
 
   public ArchivedInferredLocationRecord() {

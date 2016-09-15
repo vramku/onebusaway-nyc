@@ -39,7 +39,6 @@ import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Table;
-import javax.persistence.Transient;
 
 @Entity
 @Table(name = "obanyc_last_known_vehicle")
@@ -225,8 +224,7 @@ public class CcAndInferredLocationRecord implements Serializable {
   @Column(nullable = true, name = "assigned_run_id", length = 16)
   private String assignedRunId = null;
 
-  //@Column(nullable = true, name = "assigned_block_id", length = 32)
-  @Transient
+  @Column(nullable = true, name = "assigned_block_id", length = 32)
   private String assignedBlockId = null;
 
   public String getUUID() {
