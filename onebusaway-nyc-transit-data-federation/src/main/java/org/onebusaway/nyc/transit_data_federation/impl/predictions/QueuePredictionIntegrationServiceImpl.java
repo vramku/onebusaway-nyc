@@ -250,74 +250,78 @@ public class QueuePredictionIntegrationServiceImpl extends
 				}
 				
 				
-				try{
+				if(vehicleStatus != null && vehicleStatus.getTripStatus() != null){
 					TripStatusBean tripStatus = vehicleStatus.getTripStatus();
-					if (tripStatus == null)
-						_log.warn("tripStatus is NULL");
-	
+					/*if (tripStatus == null)
+						_log.warn("tripStatus is NULL");*/
+					
+					
 					BlockInstanceBean blockInstance = _transitDataService
 							.getBlockInstance(tripStatus.getActiveTrip()
 									.getBlockId(), tripStatus.getServiceDate());
-					if (blockInstance == null)
-						_log.warn("blockInstance is NULL");
-	
-					List<BlockTripBean> blockTrips = blockInstance
-							.getBlockConfiguration().getTrips();
-					if (blockTrips == null)
-						_log.warn("blockTrips is NULL");
-	
-					if (blockTrips.size() == 0) {
-						_log.warn("blockTrips is EMPTY");
-					}
-				
-
-					boolean match = false;
 					
-					_log.info("BLOCK ID: " + blockInstance.getBlockId());
-					for (BlockTripBean blockTrip : blockTrips) {
+					if(blockInstance != null){
+					/*if (blockInstance == null)
+						_log.warn("blockInstance is NULL");*/
 	
-						if (tripId.equals(blockTrip.getTrip().getId())) {
-							match = true;
-							for (BlockStopTimeBean bst : blockTrip
-									.getBlockStopTimes()) {
-								_log.info("BlockStopTime Stop Id: "
-										+ bst.getStopTime().getStop().getId());
-								_log.info("BlockStopTime Service Date: "
-										+ Long.toString(tripStatus.getServiceDate()));
-								_log.info("BlockStopTIme Arrival Time:"
-										+ Long.toString(bst.getStopTime()
-												.getArrivalTime() * 1000));
+						List<BlockTripBean> blockTrips = blockInstance
+								.getBlockConfiguration().getTrips();
+						if (blockTrips == null)
+							_log.warn("blockTrips is NULL");
+		
+						if (blockTrips.size() == 0) {
+							_log.warn("blockTrips is EMPTY");
+						}
+					
+	
+						boolean match = false;
+						
+						_log.info("BLOCK ID: " + blockInstance.getBlockId());
+						for (BlockTripBean blockTrip : blockTrips) {
+		
+							if (tripId.equals(blockTrip.getTrip().getId())) {
+								match = true;
+								for (BlockStopTimeBean bst : blockTrip
+										.getBlockStopTimes()) {
+									_log.info("BlockStopTime Stop Id: "
+											+ bst.getStopTime().getStop().getId());
+									_log.info("BlockStopTime Service Date: "
+											+ Long.toString(tripStatus.getServiceDate()));
+									_log.info("BlockStopTIme Arrival Time:"
+											+ Long.toString(bst.getStopTime()
+													.getArrivalTime() * 1000));
+								}
+							}
+							if(getShowBlockTrips()){
+								_log.info(">>>");
+								_log.info("Block Trip ID: " + blockTrip.getTrip().getId());
+								_log.info(">>>");
 							}
 						}
-						if(getShowBlockTrips()){
-							_log.info(">>>");
-							_log.info("Block Trip ID: " + blockTrip.getTrip().getId());
-							_log.info(">>>");
+		
+						if (match) {
+							_log.info("found a match between Trip Update Trip ID (" + tripId + ")  and blockTrip Trip Id");	
+						} else {
+							_log.info("::NO MATCH:: between Trip Update trip ID and blockTrip Trip Id");
+							_log.info("Active Trip Id: "
+									+ tripStatus.getActiveTrip().getId());
+							_log.info("Trip Status Service Date: "
+									+ tripStatus.getServiceDate());
+		
 						}
+						_log.info(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 					}
-	
-					if (match) {
-						_log.info("found a match between Trip Update Trip ID (" + tripId + ")  and blockTrip Trip Id");	
-					} else {
-						_log.info("::NO MATCH:: between Trip Update trip ID and blockTrip Trip Id");
-						_log.info("Active Trip Id: "
-								+ tripStatus.getActiveTrip().getId());
-						_log.info("Trip Status Service Date: "
-								+ tripStatus.getServiceDate());
-	
-					}
-					_log.info(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 				}
-				catch(NullPointerException npe){
-					/*VehicleStatusBean vehicleStatusTest = _transitDataService
+				/*catch(NullPointerException npe){
+					VehicleStatusBean vehicleStatusTest = _transitDataService
 							.getVehicleForAgency(vehicleId,
 									System.currentTimeMillis());
 					TripStatusBean tripStatusTest = vehicleStatus.getTripStatus();
 					BlockInstanceBean blockInstance = _transitDataService
 							.getBlockInstance(tripStatusTest.getActiveTrip()
-									.getBlockId(), tripStatusTest.getServiceDate());*/
+									.getBlockId(), tripStatusTest.getServiceDate());
 					_log.warn("vehicle status missing a value", npe);
-				}
+				}*/
 
 			}
 
