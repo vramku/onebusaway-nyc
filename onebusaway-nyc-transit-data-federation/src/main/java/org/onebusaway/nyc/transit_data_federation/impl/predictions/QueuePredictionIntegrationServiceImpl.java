@@ -1,5 +1,6 @@
 package org.onebusaway.nyc.transit_data_federation.impl.predictions;
 
+import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -45,7 +46,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private static final int DEFAULT_CACHE_TIMEOUT = 2 * 60; // seconds
 	private static final String CACHE_TIMEOUT_KEY = "tds.prediction.expiry";
 
-	private static final String DEFAULT_STOP_ID = "0";
+	private static final String DEFAULT_STOP_ID = "981010";
 	private static final String DEFAULT_VEHICLE_ID = "6379";
 	private static final String DEFAULT_FALSE = "false";
 	private static final String DEFAULT_TRUE = "true";
@@ -55,14 +56,24 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private static final String LOG_QUEUE_COUNT = "tds.prediction.enableLogQueueCount";
 	private static final String LOG_SHOW_BLOCK_TRIPS = "tds.prediction.showBlockTrips";
 
+	private static final String PREDICTION_AGE_LIMT = "display.predictionAgeLimit";
+	private static final String CHECK_PREDICTION_AGE = "display.checkPredictionAge";
+	private static final String CHECK_PREDICTION_LATENCY = "display.checkPredictionLatency";
+
 	private static String _vehicleId;
 	private static String _stopId;
 	private Boolean _enableQueueCount;
 	private Boolean _showBlockTrips;
+	private Boolean _checkPredictionAge;
+	private Boolean _checkPredictionLatency;
+	private Integer _predictionAgeLimit = 300;
 
 	Date markTimestamp = new Date();
 	int processedCount = 0;
 	int _countInterval = 10000;
+	int predictionRecordCount = 0;
+	int predictionRecordCountInterval = 2000;
+	long predictionRecordAverageLatency = 0;
 
 	@Autowired
 	private NycTransitDataService _transitDataService;
@@ -105,28 +116,70 @@ public class QueuePredictionIntegrationServiceImpl extends
 		_log.info("done");
 	}
 
-	@Refreshable(dependsOn = { LOG_VEHICLE_ID, LOG_STOP_ID, LOG_QUEUE_COUNT, LOG_SHOW_BLOCK_TRIPS })
-	private synchronized void refreshLoggingConfig() {
+	@Refreshable(dependsOn = { LOG_VEHICLE_ID, LOG_STOP_ID, LOG_QUEUE_COUNT,
+			LOG_SHOW_BLOCK_TRIPS, CHECK_PREDICTION_LATENCY,
+			CHECK_PREDICTION_AGE, PREDICTION_AGE_LIMT })
+	private synchronized void refreshConfig() {
 		_vehicleId = _configurationService.getConfigurationValueAsString(
 				LOG_VEHICLE_ID, DEFAULT_VEHICLE_ID);
 		_stopId = _configurationService.getConfigurationValueAsString(
 				LOG_STOP_ID, DEFAULT_STOP_ID);
 		_enableQueueCount = Boolean.parseBoolean(_configurationService
-				.getConfigurationValueAsString(LOG_QUEUE_COUNT,
-						DEFAULT_FALSE));
+				.getConfigurationValueAsString(LOG_QUEUE_COUNT, DEFAULT_FALSE));
 		_showBlockTrips = Boolean.parseBoolean(_configurationService
 				.getConfigurationValueAsString(LOG_SHOW_BLOCK_TRIPS,
 						DEFAULT_FALSE));
+		_checkPredictionAge = Boolean.parseBoolean(_configurationService
+				.getConfigurationValueAsString(CHECK_PREDICTION_AGE,
+						DEFAULT_FALSE));
+		_checkPredictionLatency = Boolean.parseBoolean(_configurationService
+				.getConfigurationValueAsString(CHECK_PREDICTION_LATENCY,
+						DEFAULT_FALSE));
+		_predictionAgeLimit = Integer.parseInt(_configurationService
+				.getConfigurationValueAsString(PREDICTION_AGE_LIMT, "300"));
 	}
 
 	@Override
 	protected void processResult(FeedMessage message) {
 
-		List<TimepointPredictionRecord> predictionRecords = new ArrayList<TimepointPredictionRecord>();
-		List<TimepointPredictionRecord> predictionRecordsNoSchedule = new ArrayList<TimepointPredictionRecord>();
+		long currentTime = System.currentTimeMillis();
+		Long messageTimeStamp = message.getHeader().getTimestamp();
+		String messageTimeAsText = getHumanReadableTimestamp(messageTimeStamp);
+
 		String tripId = null;
 		String vehicleId = null;
 		String routeId = null;
+
+		if (enableCheckPredictionLatency()) {
+			if (messageTimeStamp != null && messageTimeStamp > 0) {
+				predictionRecordCount++;
+				predictionRecordAverageLatency += (currentTime - messageTimeStamp);
+				if (predictionRecordCount == predictionRecordCountInterval) {
+					String avgPredictionRecordLatencyAsText = getHumanReadableElapsedTime(predictionRecordAverageLatency
+							/ predictionRecordCountInterval);
+					_log.info("Average predictions message latency is: "
+							+ avgPredictionRecordLatencyAsText);
+					predictionRecordCount = 0;
+					predictionRecordAverageLatency = 0;
+				}
+			}
+		}
+
+		if (enableCheckPredictionAge()) {
+			long difference = computeTimeDifference(messageTimeStamp);
+			if (difference > _predictionAgeLimit) {
+				if (message.getEntityCount() > 0
+						&& message.getEntity(0).getVehicle() != null)
+					_log.info("Prediction Trip Update for "
+							+ message.getEntity(0).getTripUpdate().getVehicle()
+									.getId() + " discarded.");
+				return;
+			}
+		}
+
+		List<TimepointPredictionRecord> predictionRecords = new ArrayList<TimepointPredictionRecord>();
+		List<TimepointPredictionRecord> predictionRecordsNoSchedule = new ArrayList<TimepointPredictionRecord>();
+
 		Map<String, Long> stopTimeMap = new HashMap<String, Long>();
 		// convert FeedMessage to TimepointPredictionRecord
 		for (GtfsRealtime.FeedEntity entity : message.getEntityList()) {
@@ -153,39 +206,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 				tpr.setTimepointPredictedTime(stu.getArrival().getTime());
 				Long scheduledTime = stopTimeMap.get(stu.getStopId());
 
-				String stopLogMessage = "";
-				String vehicleLogMessage = "";
-
 				if (containsId(stu.getStopId(), getStopId())) {
 					containsStop = true;
-					/*stopLogMessage += " Stop Id: " + stu.getStopId();
-					stopLogMessage += " Route Id: " + routeId;
-					stopLogMessage += " Time: "
-							+ getTime(stu.getArrival().getTime());
-					if (vehicleId != null) {
-						stopLogMessage += " Vehicle Id: " + vehicleId;
-					} else {
-						stopLogMessage += " Vehicle Id is blank";
-					}
-
-					_log.info(stopLogMessage);*/
 				}
-
-				/*if (vehicleId != null) {
-
-					if (containsId(vehicleId, getVehicleId())) {
-						vehicleLogMessage += " Vehicle Id: " + vehicleId;
-						vehicleLogMessage += " Route Id: " + routeId;
-						vehicleLogMessage += " Stop Id: " + stu.getStopId();
-						vehicleLogMessage += " Time: "
-								+ getTime(stu.getArrival().getTime());
-
-						_log.info(vehicleLogMessage);
-					}
-				} else {
-					_log.warn("Vehicle ID for Stop Id: " + stu.getStopId()
-							+ " returned null");
-				}*/
 
 				if (scheduledTime != null) {
 					tpr.setTimepointScheduledTime(scheduledTime);
@@ -209,14 +232,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 				_log.warn("Trip ID " + tripId);
 				_log.warn("Route ID " + routeId);
 				_log.warn("Stop ID " + getStopId());
-				TripUpdate tuInspect = tu;
-				Map<String, Long> stopTimeMapInspect = stopTimeMap;
-				for (StopTimeUpdate stu : tu.getStopTimeUpdateList()) {
-					Long scheduledTimeInspect = stopTimeMap
-							.get(stu.getStopId());
-				}
 				_log.info("=================================================================================================");
-
 			}
 
 			if (predictionRecordsNoSchedule.size() > 1 && containsStop) {
@@ -227,114 +243,72 @@ public class QueuePredictionIntegrationServiceImpl extends
 				_log.warn("Trip ID " + tripId);
 				_log.warn("Route ID " + routeId);
 				_log.warn("Stop ID " + getStopId());
-
-				//TripUpdate tuInspect = tu;
-				//Map<String, Long> stopTimeMapInspect = stopTimeMap;
+				_log.info("Predictions Timestamp: " + messageTimeAsText);
 
 				VehicleStatusBean vehicleStatus = _transitDataService
 						.getVehicleForAgency(vehicleId,
 								System.currentTimeMillis());
-				if (vehicleStatus == null) {
-					_log.warn("vehicleStatus is NULL");
-					VehicleStatusBean vehicleStatusTemp = _transitDataService
-							.getVehicleForAgency(vehicleId,
-									System.currentTimeMillis());
 
-					if (vehicleStatusTemp == null) {
-						_log.info("vehicleStatusTemp is NULL");
-					} else {
-						_log.info(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::");
-						_log.info("vehicleStatusTemp is NOT NULL");
-						_log.info(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::");
-					}
-				}
-				
-				
-				if(vehicleStatus != null && vehicleStatus.getTripStatus() != null){
+				if (vehicleStatus != null
+						&& vehicleStatus.getTripStatus() != null) {
 					TripStatusBean tripStatus = vehicleStatus.getTripStatus();
-					/*if (tripStatus == null)
-						_log.warn("tripStatus is NULL");*/
-					
-					
+
 					BlockInstanceBean blockInstance = _transitDataService
 							.getBlockInstance(tripStatus.getActiveTrip()
 									.getBlockId(), tripStatus.getServiceDate());
-					
-					if(blockInstance != null){
-					/*if (blockInstance == null)
-						_log.warn("blockInstance is NULL");*/
-	
+
+					if (blockInstance != null) {
+
 						List<BlockTripBean> blockTrips = blockInstance
 								.getBlockConfiguration().getTrips();
 						if (blockTrips == null)
 							_log.warn("blockTrips is NULL");
-		
+
 						if (blockTrips.size() == 0) {
 							_log.warn("blockTrips is EMPTY");
 						}
-					
-	
+
 						boolean match = false;
-						
+
 						_log.info("BLOCK ID: " + blockInstance.getBlockId());
 						for (BlockTripBean blockTrip : blockTrips) {
-		
+
 							if (tripId.equals(blockTrip.getTrip().getId())) {
 								match = true;
 								for (BlockStopTimeBean bst : blockTrip
 										.getBlockStopTimes()) {
 									_log.info("BlockStopTime Stop Id: "
-											+ bst.getStopTime().getStop().getId());
+											+ bst.getStopTime().getStop()
+													.getId());
 									_log.info("BlockStopTime Service Date: "
-											+ Long.toString(tripStatus.getServiceDate()));
+											+ Long.toString(tripStatus
+													.getServiceDate()));
 									_log.info("BlockStopTIme Arrival Time:"
 											+ Long.toString(bst.getStopTime()
 													.getArrivalTime() * 1000));
 								}
 							}
-							if(getShowBlockTrips()){
+							if (getShowBlockTrips()) {
 								_log.info(">>>");
-								_log.info("Block Trip ID: " + blockTrip.getTrip().getId());
+								_log.info("Block Trip ID: "
+										+ blockTrip.getTrip().getId());
 								_log.info(">>>");
 							}
 						}
-		
+
 						if (match) {
-							_log.info("found a match between Trip Update Trip ID (" + tripId + ")  and blockTrip Trip Id");	
+							_log.info("found a match between Trip Update Trip ID ("
+									+ tripId + ")  and blockTrip Trip Id");
 						} else {
 							_log.info("::NO MATCH:: between Trip Update trip ID and blockTrip Trip Id");
 							_log.info("Active Trip Id: "
 									+ tripStatus.getActiveTrip().getId());
 							_log.info("Trip Status Service Date: "
 									+ tripStatus.getServiceDate());
-		
+
 						}
 						_log.info(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 					}
-				}
-				/*catch(NullPointerException npe){
-					VehicleStatusBean vehicleStatusTest = _transitDataService
-							.getVehicleForAgency(vehicleId,
-									System.currentTimeMillis());
-					TripStatusBean tripStatusTest = vehicleStatus.getTripStatus();
-					BlockInstanceBean blockInstance = _transitDataService
-							.getBlockInstance(tripStatusTest.getActiveTrip()
-									.getBlockId(), tripStatusTest.getServiceDate());
-					_log.warn("vehicle status missing a value", npe);
-				}*/
-
-			}
-
-			// Check if cache contains record
-			if (containsId(vehicleId, getVehicleId())) {
-				List<TimepointPredictionRecord> records = getCache()
-						.getIfPresent(hash(vehicleId, tripId));
-				if(records == null || records.size() == 0 ){
-					_log.info("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-					_log.warn("Vehicle " + vehicleId
-							+ " has no Time Prediction Records.");
-					_log.warn("Route ID " + routeId);
-					_log.info("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
 				}
 			}
 		}
@@ -354,6 +328,27 @@ public class QueuePredictionIntegrationServiceImpl extends
 				processedCount = 0;
 			}
 		}
+	}
+
+	protected long computeTimeDifference(long timestamp) {
+		return (System.currentTimeMillis() - timestamp) / 1000; // output in
+																// seconds
+	}
+
+	private String getHumanReadableTimestamp(Long timestamp) {
+		if (timestamp != null && timestamp > 0) {
+			getTime(timestamp);
+		}
+		return "N/A";
+	}
+
+	private String getHumanReadableElapsedTime(long timestamp) {
+		return String.format(
+				"%02d min, %02d sec",
+				TimeUnit.MILLISECONDS.toMinutes(timestamp),
+				TimeUnit.MILLISECONDS.toSeconds(timestamp)
+						- TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS
+								.toMinutes(timestamp)));
 	}
 
 	private String hash(String vehicleId, String tripId) {
@@ -436,29 +431,38 @@ public class QueuePredictionIntegrationServiceImpl extends
 	}
 
 	private String getStopId() {
-		/*
-		 * if(_stopId == null){ refreshLoggingConfig(); }
-		 */
-		return "981010";
+
+		if (_stopId == null) {
+			refreshConfig();
+		}
+
+		return "_stopId";
 	}
 
-	private String getVehicleId() {
-		if (_vehicleId == null) {
-			refreshLoggingConfig();
+	private boolean enableCheckPredictionAge() {
+		if (_checkPredictionAge == null) {
+			refreshConfig();
 		}
-		return _vehicleId;
+		return _checkPredictionAge;
+	}
+
+	private boolean enableCheckPredictionLatency() {
+		if (_checkPredictionLatency == null) {
+			refreshConfig();
+		}
+		return _checkPredictionLatency;
 	}
 
 	private boolean getQueueCount() {
 		if (_enableQueueCount == null) {
-			refreshLoggingConfig();
+			refreshConfig();
 		}
 		return _enableQueueCount;
 	}
-	
+
 	private boolean getShowBlockTrips() {
 		if (_showBlockTrips == null) {
-			refreshLoggingConfig();
+			refreshConfig();
 		}
 		return _showBlockTrips;
 	}
