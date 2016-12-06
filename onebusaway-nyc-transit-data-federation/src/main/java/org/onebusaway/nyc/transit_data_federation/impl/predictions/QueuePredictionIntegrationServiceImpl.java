@@ -71,9 +71,15 @@ public class QueuePredictionIntegrationServiceImpl extends
 	Date markTimestamp = new Date();
 	int processedCount = 0;
 	int _countInterval = 10000;
-	int predictionRecordCount = 0;
-	int predictionRecordCountInterval = 2000;
-	long predictionRecordAverageLatency = 0;
+	
+	Map<String, Integer> instanceCountMap = new HashMap<String, Integer>();
+	Map<String, Long> avgLatencyMap = new HashMap<String, Long>();
+	
+	int countInterval = 2000;
+	
+	Integer predictionRecordCount = 0;
+	Integer predictionRecordCountInterval = 2000;
+	Long predictionRecordAverageLatency = (long) 0;
 
 	@Autowired
 	private NycTransitDataService _transitDataService;
@@ -149,6 +155,8 @@ public class QueuePredictionIntegrationServiceImpl extends
 		String tripId = null;
 		String vehicleId = null;
 		String routeId = null;
+		
+		
 
 		if (enableCheckPredictionLatency()) {
 			if (messageTimeStamp != null && messageTimeStamp > 0) {
@@ -160,7 +168,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 					_log.info("Average predictions message latency is: "
 							+ avgPredictionRecordLatencyAsText);
 					predictionRecordCount = 0;
-					predictionRecordAverageLatency = 0;
+					predictionRecordAverageLatency = (long) 0;
 				}
 			}
 		}
@@ -312,6 +320,11 @@ public class QueuePredictionIntegrationServiceImpl extends
 				}
 			}
 		}
+		
+		checkLatencyInMillis(currentTime, "processResults", countInterval);
+		
+		long startTime = System.currentTimeMillis();
+		
 		if (getQueueCount()) {
 			processedCount++;
 			if (processedCount > _countInterval) {
@@ -328,6 +341,8 @@ public class QueuePredictionIntegrationServiceImpl extends
 				processedCount = 0;
 			}
 		}
+		checkLatencyInMillis(startTime, "queueCount", countInterval);
+		
 	}
 
 	protected long computeTimeDifference(long timestamp) {
@@ -356,6 +371,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 	}
 
 	private Map<String, Long> loadScheduledTimes(String vehicleId, String tripId) {
+		
+		long startTime = System.currentTimeMillis();
+		
 		Map<String, Long> map = new HashMap<String, Long>();
 		VehicleStatusBean vehicleStatus = _transitDataService
 				.getVehicleForAgency(vehicleId, System.currentTimeMillis());
@@ -368,10 +386,13 @@ public class QueuePredictionIntegrationServiceImpl extends
 		if (tripStatus == null) {
 			return map;
 		}
+		
 
+		
 		BlockInstanceBean blockInstance = _transitDataService.getBlockInstance(
 				tripStatus.getActiveTrip().getBlockId(),
 				tripStatus.getServiceDate());
+	
 		if (blockInstance == null) {
 			return map;
 		}
@@ -391,6 +412,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 				}
 			}
 		}
+		
+		checkLatencyInMillis(startTime, "blockInstanceCount", countInterval);
+		
 		return map;
 	}
 
@@ -410,6 +434,38 @@ public class QueuePredictionIntegrationServiceImpl extends
 	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTrip(
 			String VehicleId, String TripId) {
 		return getCache().getIfPresent(hash(VehicleId, TripId));
+	}
+	
+	private void checkLatencyInMillis(long timeStamp, String instance, int countInterval){
+		// instance count
+		Integer instanceCount = instanceCountMap.get(instance);
+		if (instanceCount == null) {
+			instanceCountMap.put(instance, 1);
+		}
+		else {
+			instanceCountMap.put(instance, instanceCount + 1);
+		}
+		instanceCount = instanceCountMap.get(instance);
+		
+		// avg latency
+		Long avgLatency = avgLatencyMap.get(instance);
+		if (avgLatency == null) {
+			avgLatencyMap.put(instance, System.currentTimeMillis() - timeStamp);
+		}
+		else {
+			avgLatencyMap.put(instance, avgLatency + (System.currentTimeMillis() - timeStamp));
+		}
+		avgLatency = avgLatencyMap.get(instance);
+		
+		// reset count
+		if (instanceCount == countInterval) {
+			String avgLatencyAsText = Long.toString(avgLatency
+					/ countInterval) + "ms";
+			String logMsg = "Average " +  instance + " message latency is: ";
+			_log.info(logMsg + avgLatencyAsText);
+			instanceCountMap.put(instance, null);
+			avgLatencyMap.put(instance, null);
+		}
 	}
 
 	private String getTime(Long milliseconds) {
