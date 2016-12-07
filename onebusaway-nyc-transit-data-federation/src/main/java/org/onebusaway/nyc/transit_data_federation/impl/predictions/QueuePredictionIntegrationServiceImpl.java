@@ -77,9 +77,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 	
 	int countInterval = 2000;
 	
-	Integer predictionRecordCount = 0;
-	Integer predictionRecordCountInterval = 2000;
-	Long predictionRecordAverageLatency = (long) 0;
+	int predictionRecordCount = 0;
+	int predictionRecordCountInterval = 2000;
+	long predictionRecordAverageLatency = 0;
 
 	@Autowired
 	private NycTransitDataService _transitDataService;
@@ -162,7 +162,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 			if (messageTimeStamp != null && messageTimeStamp > 0) {
 				predictionRecordCount++;
 				predictionRecordAverageLatency += (currentTime - messageTimeStamp);
-				if (predictionRecordCount == predictionRecordCountInterval) {
+				if (predictionRecordCount >= predictionRecordCountInterval) {
 					String avgPredictionRecordLatencyAsText = getHumanReadableElapsedTime(predictionRecordAverageLatency
 							/ predictionRecordCountInterval);
 					_log.info("Average predictions message latency is: "
