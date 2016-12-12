@@ -77,16 +77,19 @@ public abstract class QueueListenerTask {
 
 		int processedCount = 0;
 		
-		int slowDownCount = 0;
-		
 		long postpoll = 0;
+		
+		int runCount = 0;
+		
+		long prevThreadTimestamp = System.currentTimeMillis();
+		long threadtimestampAvgDiff = 0;
 
 		Date markTimestamp = new Date();
 
 		private ZMQ.Socket _zmqSocket = null;
 
 		private ZMQ.Poller _zmqPoller = null;
-
+		
 		private boolean _notifyShutdown = false;
 		
 		public ReadThread(ZMQ.Socket socket, ZMQ.Poller poller) {
@@ -96,13 +99,23 @@ public abstract class QueueListenerTask {
 
 		@Override
 		public void run() {
-		  _log.warn("ReadThread for queue " + getQueueName() + " starting");
 		  
+		  _log.warn("ReadThread for queue " + getQueueName() + " starting");
 			while (!_notifyShutdown) {
+				threadtimestampAvgDiff += (System.currentTimeMillis() - prevThreadTimestamp);
+				prevThreadTimestamp = System.currentTimeMillis();
+
 				long prepoll = System.currentTimeMillis();
+				
+				runCount++;
+				
+				if(runCount > 2000){
+					_log.info(getQueueName() + " thread timestamp " + threadtimestampAvgDiff/runCount);
+					runCount = 0;
+					threadtimestampAvgDiff =0 ;
+				}
 			  _zmqPoller.poll(1000 * 1000); // microseconds for 2.2, milliseconds for 3.0
 				if (_zmqPoller.pollin(0)) {
-
 					String address = new String(_zmqSocket.recv(0));
 					byte[] buff = _zmqSocket.recv(0);
 					
@@ -126,9 +139,12 @@ public abstract class QueueListenerTask {
 							+ " seconds. (" + (1000.0 * processedCount/timeInterval) 
 							+ ") records/second");
 					
-					_log.info(getQueueDisplayName() + " average poll time is " + postpoll/processedCount + "ms"); 
+					long avgPollTime = postpoll/processedCount;
+					
+					_log.info(getQueueDisplayName() + " average poll time is " + avgPollTime + "ms");
 
 					markTimestamp = new Date();
+					postpoll = 0;
 					processedCount = 0;
 				}
 				
@@ -223,5 +239,4 @@ public abstract class QueueListenerTask {
 			}
 		}
 	}
-
 }
