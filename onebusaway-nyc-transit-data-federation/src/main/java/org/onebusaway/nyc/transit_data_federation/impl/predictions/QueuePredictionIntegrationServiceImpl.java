@@ -16,6 +16,7 @@ import org.onebusaway.container.refresh.Refreshable;
 import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.nyc.transit_data_federation.impl.queue.TimeQueueListenerTask;
+import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionCacheService;
 import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionIntegrationService;
 import org.onebusaway.nyc.util.configuration.ConfigurationService;
 import org.onebusaway.realtime.api.TimepointPredictionRecord;
@@ -67,6 +68,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private Boolean _checkPredictionAge;
 	private Boolean _checkPredictionLatency;
 	private Integer _predictionAgeLimit = 300;
+	private String _agencyFilter = null;
 
 	Date markTimestamp = new Date();
 	int processedCount = 0;
@@ -86,40 +88,13 @@ public class QueuePredictionIntegrationServiceImpl extends
 
 	@Autowired
 	private ConfigurationService _configurationService;
+	
+	@Autowired
+	private PredictionCacheService _cacheService;
+	//private Cache<String, List<TimepointPredictionRecord>> _cache = null;
 
-	private Cache<String, List<TimepointPredictionRecord>> _cache = null;
-
-	private synchronized Cache<String, List<TimepointPredictionRecord>> getCache() {
-		if (_cache == null) {
-
-			int timeout = _configurationService.getConfigurationValueAsInteger(
-					CACHE_TIMEOUT_KEY, DEFAULT_CACHE_TIMEOUT);
-			_log.info("creating initial prediction cache with timeout "
-					+ timeout + "...");
-			_cache = CacheBuilder.newBuilder()
-					.expireAfterWrite(timeout, TimeUnit.SECONDS).build();
-			_log.info("done");
-		}
-		return _cache;
-	}
-
-	@Refreshable(dependsOn = { CACHE_TIMEOUT_KEY })
-	private synchronized void refreshCache() {
-		if (_cache == null)
-			return; // nothing to do
-		int timeout = _configurationService.getConfigurationValueAsInteger(
-				CACHE_TIMEOUT_KEY, DEFAULT_CACHE_TIMEOUT);
-		_log.info("rebuilding prediction cache with " + _cache.size()
-				+ " entries after refresh with timeout=" + timeout + "...");
-		ConcurrentMap<String, List<TimepointPredictionRecord>> map = _cache
-				.asMap();
-		_cache = CacheBuilder.newBuilder()
-				.expireAfterWrite(timeout, TimeUnit.SECONDS).build();
-		for (Entry<String, List<TimepointPredictionRecord>> entry : map
-				.entrySet()) {
-			_cache.put(entry.getKey(), entry.getValue());
-		}
-		_log.info("done");
+	private Cache<String, List<TimepointPredictionRecord>> getCache() {
+		return _cacheService.getCache();
 	}
 
 	@Refreshable(dependsOn = { LOG_VEHICLE_ID, LOG_STOP_ID, LOG_QUEUE_COUNT,
@@ -147,7 +122,12 @@ public class QueuePredictionIntegrationServiceImpl extends
 
 	@Override
 	protected void processResult(FeedMessage message) {
-
+		int entityCount = message.getEntityCount();
+		
+		if(entityCount == 0 || _agencyFilter != null && !containsAgencyId(message.getEntity(0).getId(), _agencyFilter)){
+			return;
+		}
+		
 		long currentTime = System.currentTimeMillis();
 		Long messageTimeStamp = message.getHeader().getTimestamp();
 		String messageTimeAsText = getHumanReadableTimestamp(messageTimeStamp);
@@ -155,8 +135,6 @@ public class QueuePredictionIntegrationServiceImpl extends
 		String tripId = null;
 		String vehicleId = null;
 		String routeId = null;
-		
-		
 
 		if (enableCheckPredictionLatency()) {
 			if (messageTimeStamp != null && messageTimeStamp > 0) {
@@ -176,8 +154,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 		if (enableCheckPredictionAge()) {
 			long difference = computeTimeDifference(messageTimeStamp);
 			if (difference > _predictionAgeLimit) {
-				if (message.getEntityCount() > 0
-						&& message.getEntity(0).getVehicle() != null)
+				if (message.getEntity(0).getVehicle() != null)
 					_log.info("Prediction Trip Update for "
 							+ message.getEntity(0).getTripUpdate().getVehicle()
 									.getId() + " discarded.");
@@ -229,6 +206,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 			if (vehicleId != null) {
 				// place in cache if we were able to extract a vehicle id
 				getCache().put(hash(vehicleId, tripId), predictionRecords);
+				if(vehicleId.equals("MTA NYCT_5706")){
+					_log.info("MTA NYCT_5706");
+				}
 			}
 
 			// Logs all the vehicles in a stop that don't have predictions for
@@ -433,7 +413,9 @@ public class QueuePredictionIntegrationServiceImpl extends
 
 	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTrip(
 			String VehicleId, String TripId) {
-		return getCache().getIfPresent(hash(VehicleId, TripId));
+		Cache<String, List<TimepointPredictionRecord>> cache = getCache();
+		List<TimepointPredictionRecord> records = cache.getIfPresent(hash(VehicleId, TripId));
+		return records;
 	}
 	
 	private void checkLatencyInMillis(long timeStamp, String instance, int countInterval){
@@ -485,6 +467,17 @@ public class QueuePredictionIntegrationServiceImpl extends
 		}
 		return false;
 	}
+	
+	private boolean containsAgencyId(String idWithPrefix, String configId){
+		int i = idWithPrefix.lastIndexOf('_');
+		if (i >= 0) {
+			String id = idWithPrefix.substring(0,i);
+			if (id.equals(configId)) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	private String getStopId() {
 
@@ -521,5 +514,13 @@ public class QueuePredictionIntegrationServiceImpl extends
 			refreshConfig();
 		}
 		return _showBlockTrips;
+	}
+	
+	public String getAgencyFilter(){
+		return _agencyFilter;
+	}
+	
+	public void setAgencyFilter(String agencyFilter){
+		_agencyFilter = agencyFilter;
 	}
 }

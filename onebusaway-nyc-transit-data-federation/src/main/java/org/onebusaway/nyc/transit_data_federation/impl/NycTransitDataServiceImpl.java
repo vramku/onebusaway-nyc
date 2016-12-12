@@ -28,7 +28,7 @@ import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
 import org.onebusaway.nyc.transit_data_federation.impl.nyc.BundleSearchServiceImpl;
 import org.onebusaway.nyc.transit_data_federation.model.bundle.BundleItem;
 import org.onebusaway.nyc.transit_data_federation.services.bundle.BundleManagementService;
-import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionIntegrationService;
+import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionCacheService;
 import org.onebusaway.nyc.transit_data_federation.services.schedule.ScheduledServiceService;
 import org.onebusaway.realtime.api.TimepointPredictionRecord;
 import org.onebusaway.transit_data.model.AgencyBean;
@@ -100,7 +100,7 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	private BundleManagementService _bundleManagementService;
 
 	@Autowired
-	private PredictionIntegrationService _predictionIntegrationService;
+	private PredictionCacheService _predictionCacheService;
 
 	@Autowired
 	private ScheduledServiceService _scheduledServiceService;
@@ -144,13 +144,13 @@ class NycTransitDataServiceImpl implements NycTransitDataService {
 	public List<TimepointPredictionRecord> getPredictionRecordsForTrip(String agencyId,
 			TripStatusBean tripStatus) {
 		blockUntilBundleIsReady();
-		return _predictionIntegrationService.getPredictionsForTrip(tripStatus);
+		return _predictionCacheService.getPredictionsForTrip(tripStatus);
 	}
 	
 	public List<TimepointPredictionRecord> getPredictionRecordsForVehicleAndTrip(String VehicleId,
 			String TripId) {
 		blockUntilBundleIsReady();
-		return _predictionIntegrationService.getPredictionRecordsForVehicleAndTrip(VehicleId, TripId);
+		return _predictionCacheService.getPredictionRecordsForVehicleAndTrip(VehicleId, TripId);
 	}
 
 	@Override

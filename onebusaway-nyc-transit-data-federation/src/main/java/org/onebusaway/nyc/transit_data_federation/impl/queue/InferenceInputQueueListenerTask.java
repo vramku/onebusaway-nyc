@@ -17,7 +17,6 @@ package org.onebusaway.nyc.transit_data_federation.impl.queue;
 
 import org.onebusaway.container.refresh.Refreshable;
 import org.onebusaway.nyc.transit_data.model.NycQueuedInferredLocationBean;
-import org.onebusaway.nyc.transit_data_federation.services.predictions.PredictionIntegrationService;
 import org.onebusaway.nyc.util.impl.tdm.ConfigurationServiceImpl;
 import org.onebusaway.realtime.api.EVehiclePhase;
 import org.onebusaway.realtime.api.VehicleLocationListener;
@@ -39,10 +38,6 @@ public class InferenceInputQueueListenerTask extends InferenceQueueListenerTask 
 	@Autowired
 	private VehicleLocationListener _vehicleLocationListener;
 
-	@Autowired
-	private PredictionIntegrationService _predictionIntegrationService;
-
-	private boolean useTimePredictions = false;
 	private boolean checkAge = false;
 	private int ageLimit = 300;
 	private boolean refreshCheck;
@@ -56,10 +51,6 @@ public class InferenceInputQueueListenerTask extends InferenceQueueListenerTask 
 		return "InferenceInputQueueListenerTask";
 	}
 
-	protected void setPredictionIntegrationService( PredictionIntegrationService predictionIntegrationService) {
-		_predictionIntegrationService = predictionIntegrationService;
-	}
-
 	protected void setVehicleLocationListener( VehicleLocationListener vehicleLocationListener) {
 		_vehicleLocationListener = vehicleLocationListener;
 	}
@@ -69,10 +60,9 @@ public class InferenceInputQueueListenerTask extends InferenceQueueListenerTask 
 		refreshCache();
 	}
 	
-	@Refreshable(dependsOn = {"display.checkAge", "display.useTimePredictions", "display.ageLimit"})
+	@Refreshable(dependsOn = {"display.checkAge", "display.ageLimit"})
 	protected void refreshCache() {
 		checkAge = Boolean.parseBoolean(_configurationService.getConfigurationValueAsString("display.checkAge", "false"));
-		useTimePredictions = Boolean.parseBoolean(_configurationService.getConfigurationValueAsString("display.useTimePredictions", "false"));
 		ageLimit = Integer.parseInt(_configurationService.getConfigurationValueAsString("display.ageLimit", "300"));
 	}
 	 
@@ -80,9 +70,6 @@ public class InferenceInputQueueListenerTask extends InferenceQueueListenerTask 
 		return refreshCheck;
 	}
 
-	protected boolean getUseTimePredictions() {
-		return useTimePredictions;
-	}
 	
 	protected long getAgeLimit() {
 		return ageLimit;
@@ -115,13 +102,6 @@ public class InferenceInputQueueListenerTask extends InferenceQueueListenerTask 
 		vlr.setStatus(inferredResult.getStatus());
 		if (_vehicleLocationListener != null) {
 			_vehicleLocationListener.handleVehicleLocationRecord(vlr);
-		}
-		if (useTimePredictions) {
-			// if we're updating time predictions with the generation service,
-			// tell the integration service to fetch
-			// a new set of predictions now that the TDS has been updated
-			// appropriately.
-			_predictionIntegrationService.updatePredictionsForVehicle(vlr.getVehicleId());
 		}
 	}
 }

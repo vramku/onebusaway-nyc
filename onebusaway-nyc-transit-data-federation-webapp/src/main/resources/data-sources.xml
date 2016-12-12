@@ -63,9 +63,15 @@
 -->
 	<!--  Time Queue Configuration -->
 	<!--  This option integrates with an external time prediction queue -->
-	<bean id="timeInputQueue" class="org.onebusaway.nyc.transit_data_federation.impl.predictions.QueuePredictionIntegrationServiceImpl">
-	<property name="disable" value="false"/>
+	<bean id="mta_nyct_timeInputQueue" class="org.onebusaway.nyc.transit_data_federation.impl.predictions.QueuePredictionIntegrationServiceImpl">
+	 <property name="disable" value="false"/>
+	 <property name="agencyFilter" value="MTA NYCT"/>
 	</bean>
+	
+	<bean id="mtabc_timeInputQueue" class="org.onebusaway.nyc.transit_data_federation.impl.predictions.QueuePredictionIntegrationServiceImpl">
+    <property name="disable" value="false"/>
+    <property name="agencyFilter" value="MTABC"/>
+  </bean>
 
 	<!-- Other Stuff: -->
     <bean class="org.onebusaway.container.spring.PropertyOverrideConfigurer">
