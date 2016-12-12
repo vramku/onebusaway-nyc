@@ -1,22 +1,18 @@
 package org.onebusaway.nyc.transit_data_federation.impl.predictions;
 
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 
 import org.onebusaway.container.refresh.Refreshable;
 import org.onebusaway.gtfs.model.AgencyAndId;
@@ -35,7 +31,6 @@ import org.onebusaway.transit_data_federation.services.AgencyAndIdLibrary;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.transit.realtime.GtfsRealtime;
 import com.google.transit.realtime.GtfsRealtime.FeedMessage;
 import com.google.transit.realtime.GtfsRealtime.TripUpdate;
@@ -50,18 +45,7 @@ import com.google.transit.realtime.GtfsRealtime.TripUpdate.StopTimeUpdate;
 public class QueuePredictionIntegrationServiceImpl extends
 		TimeQueueListenerTask implements PredictionIntegrationService {
 
-	private static final int DEFAULT_CACHE_TIMEOUT = 2 * 60; // seconds
-	private static final String CACHE_TIMEOUT_KEY = "tds.prediction.expiry";
-
-	private static final String DEFAULT_STOP_ID = "981010";
-	private static final String DEFAULT_VEHICLE_ID = "6379";
 	private static final String DEFAULT_FALSE = "false";
-	private static final String DEFAULT_TRUE = "true";
-
-	private static final String LOG_VEHICLE_ID = "tds.prediction.logVehicleId";
-	private static final String LOG_STOP_ID = "tds.prediction.logStopId";
-	private static final String LOG_QUEUE_COUNT = "tds.prediction.enableLogQueueCount";
-	private static final String LOG_SHOW_BLOCK_TRIPS = "tds.prediction.showBlockTrips";
 
 	private static final String PREDICTION_AGE_LIMT = "display.predictionAgeLimit";
 	private static final String CHECK_PREDICTION_AGE = "display.checkPredictionAge";
@@ -69,26 +53,23 @@ public class QueuePredictionIntegrationServiceImpl extends
 	
 	 private static final long MESSAGE_WAIT_MILLISECONDS = 1 * 1000;
 
-	private static String _vehicleId;
-	private static String _stopId;
-	private Boolean _enableQueueCount;
-	private Boolean _showBlockTrips;
 	private Boolean _checkPredictionAge;
 	private Boolean _checkPredictionLatency;
 	private Integer _predictionAgeLimit = 300;
-	private int _predictionResultThreads = 5;
+	private int _predictionResultThreads = 4;
 
 	Date markTimestamp = new Date();
 	int processedCount = 0;
 	int _countInterval = 10000;
 	
-	private Map<String, Integer> instanceCountMap = new HashMap<String, Integer>();
-	private Map<String, Long> avgLatencyMap = new HashMap<String, Long>();
+
 	private ArrayBlockingQueue<FeedMessage> _predictionMessageQueue = new ArrayBlockingQueue<FeedMessage>(
 		      1000000);
 	
 	private ExecutorService _predictionExecutorService;
-	private Future<?> _predictionThreadFuture;
+	
+	private PredictionResultTask[] _predictionResultTask;
+	private Future<?>[] _predictionResultFuture;
 	
 
 
@@ -105,19 +86,8 @@ public class QueuePredictionIntegrationServiceImpl extends
 		return _cacheService.getCache();
 	}
 
-	@Refreshable(dependsOn = { LOG_VEHICLE_ID, LOG_STOP_ID, LOG_QUEUE_COUNT,
-			LOG_SHOW_BLOCK_TRIPS, CHECK_PREDICTION_LATENCY,
-			CHECK_PREDICTION_AGE, PREDICTION_AGE_LIMT })
+	@Refreshable(dependsOn = { CHECK_PREDICTION_LATENCY,CHECK_PREDICTION_AGE, PREDICTION_AGE_LIMT })
 	private synchronized void refreshConfig() {
-		_vehicleId = _configurationService.getConfigurationValueAsString(
-				LOG_VEHICLE_ID, DEFAULT_VEHICLE_ID);
-		_stopId = _configurationService.getConfigurationValueAsString(
-				LOG_STOP_ID, DEFAULT_STOP_ID);
-		_enableQueueCount = Boolean.parseBoolean(_configurationService
-				.getConfigurationValueAsString(LOG_QUEUE_COUNT, DEFAULT_FALSE));
-		_showBlockTrips = Boolean.parseBoolean(_configurationService
-				.getConfigurationValueAsString(LOG_SHOW_BLOCK_TRIPS,
-						DEFAULT_FALSE));
 		_checkPredictionAge = Boolean.parseBoolean(_configurationService
 				.getConfigurationValueAsString(CHECK_PREDICTION_AGE,
 						DEFAULT_FALSE));
@@ -132,14 +102,54 @@ public class QueuePredictionIntegrationServiceImpl extends
 	@Override
 	public void setup() {
 		super.setup();
-		_predictionExecutorService = Executors.newFixedThreadPool(5);
 		initializePredictionQueue();
 	}
 	
-	public void initializePredictionQueue(){
+	@PreDestroy
+	@Override
+	public void destroy() {
+		super.destroy();
+		try{
+			shutdownPredictionQueue();
+		}
+		catch(InterruptedException ie){
+			_log.error("Failed to cleanly shutdown the predictionExecutorService: ", ie);
+		}
+	}
+	
+	public synchronized void initializePredictionQueue(){
+		_predictionExecutorService = Executors.newFixedThreadPool(5);
+		_predictionResultTask = new PredictionResultTask[_predictionResultThreads];
+		_predictionResultFuture = new Future<?>[_predictionResultThreads];
 		for (int i = 0; i < _predictionResultThreads; i++) {
-			ProcessResultTask task = new ProcessResultTask(i);
-			_predictionThreadFuture = _predictionExecutorService.submit(task);
+			PredictionResultTask task = new PredictionResultTask(i);
+			_predictionResultFuture[i] = _predictionExecutorService.submit(task);
+			_predictionResultTask[i] = task;
+		}
+	}
+	
+	public void shutdownPredictionQueue() throws InterruptedException{
+		try{
+			for (int i = 0; i < _predictionResultThreads; i++) {
+				_predictionResultTask[i].notifyShutdown();
+				_predictionResultFuture[i].get(1, TimeUnit.SECONDS);
+			}
+		}
+		catch (Exception e){
+			_log.error("Read thread did not complete cleanly: " + e.getMessage());
+		}
+		_predictionExecutorService.shutdownNow();
+		_predictionExecutorService.awaitTermination(1, TimeUnit.SECONDS);
+	}
+	
+	public void reinitializePredictionQueue() {
+		try{
+			shutdownPredictionQueue();
+			initializePredictionQueue();	
+		}
+		catch (InterruptedException ie) {
+			_log.error("Unable to reinitialize queue: ", ie);
+			return;
 		}
 	}
 
@@ -152,31 +162,39 @@ public class QueuePredictionIntegrationServiceImpl extends
 			      _log.warn("QUEUE FULL, dropped message");
 		}
 		catch(Exception e){
-			_log.error("Error occured when attempting to queue message");
+			_log.error("Error occured when attempting to queue message: ", e);
 		}
 	}
 	
-    private class ProcessResultTask implements Runnable {
+    private class PredictionResultTask implements Runnable {
     	private int threadNumber;
     	private int predictionRecordCount = 0;
     	private int predictionRecordCountInterval = 2000;
     	private long predictionRecordAverageLatency = 0;
+    	private boolean _notifyShutdown = false;
     	
-    	public ProcessResultTask(int threadNumber) {
+    	public PredictionResultTask(int threadNumber) {
     		this.threadNumber = threadNumber;
     	}
     	
     	public void run() {
-	    	while (!Thread.interrupted()) {
-	    		 try {
+	    	while (!_notifyShutdown) {
+	    		try {
 	    			 
 	    			 FeedMessage message =_predictionMessageQueue.poll();
 	    			 
 	    			 if(message != null){
-		    			 if (enableCheckPredictionLatency()) {
+		    			 
+	    				 if (enableCheckPredictionLatency()) {
 		    				 logPredictionLatency(message);
 		    			 }
 		    			 
+		    			 if (enableCheckPredictionAge() && 
+		    					 isPredictionRecordPastAgeLimit(message)) {
+		    				 // Drop old messages	 
+		    				 continue;
+		    			 }
+
 		    			 List<TimepointPredictionRecord> predictionRecords = new ArrayList<TimepointPredictionRecord>();  
 	    		  	  	 Map<String, Long> stopTimeMap = new HashMap<String, Long>();
 	    		  	  	 
@@ -219,6 +237,18 @@ public class QueuePredictionIntegrationServiceImpl extends
 	    			 _log.error("exception sending: ", e);
 	    		 }
 	    	}
+	    	_log.error("PredictionResultTask thread loop interrupted, exiting");
+    	}
+    	
+    	public void notifyShutdown() {
+    		_notifyShutdown = true;
+    	}
+    	
+    	private boolean enableCheckPredictionLatency() {
+    		if (_checkPredictionLatency == null) {
+    			refreshConfig();
+    		}
+    		return _checkPredictionLatency;
     	}
     	
     	private void logPredictionLatency(FeedMessage message){
@@ -245,6 +275,29 @@ public class QueuePredictionIntegrationServiceImpl extends
     				TimeUnit.MILLISECONDS.toSeconds(timestamp)
     						- TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS
     								.toMinutes(timestamp)));
+    	}
+    	
+    	private boolean enableCheckPredictionAge() {
+    		if (_checkPredictionAge == null) {
+    			refreshConfig();
+    		}
+    		return _checkPredictionAge;
+    	}
+    	
+    	private boolean isPredictionRecordPastAgeLimit(FeedMessage message){
+    		long difference = computeTimeDifference(message.getHeader().getTimestamp());
+			if (difference > _predictionAgeLimit) {
+				if (message.getEntity(0).getVehicle() != null)
+					_log.info("Prediction Trip Update for "
+							+ message.getEntity(0).getTripUpdate().getVehicle()
+									.getId() + " discarded.");
+				return true;
+			}
+			return false;
+    	}
+    	
+    	protected long computeTimeDifference(long timestamp) {
+    		return (System.currentTimeMillis() - timestamp) / 1000; // output in seconds															
     	}
     	
     	private Map<String, Long> loadScheduledTimes(String vehicleId, String tripId) {
@@ -292,10 +345,6 @@ public class QueuePredictionIntegrationServiceImpl extends
     	public int getThreadNumber(){
     		return this.threadNumber;
     	}
-    	
-    	public void setThreadNumber(int threadNumber){
-    		this.threadNumber = threadNumber;
-    	}
     }
 	
 	@Override
@@ -307,13 +356,6 @@ public class QueuePredictionIntegrationServiceImpl extends
 		return vehicleId + "-" + tripId;
 	}
 	
-	private boolean enableCheckPredictionLatency() {
-		if (_checkPredictionLatency == null) {
-			refreshConfig();
-		}
-		return _checkPredictionLatency;
-	}
-
 	@Override
 	  public List<TimepointPredictionRecord> getPredictionsForTrip(
 	      TripStatusBean tripStatus) {
