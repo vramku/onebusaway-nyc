@@ -139,17 +139,23 @@ public class QueuePredictionIntegrationServiceImpl extends
 		}
 	}
 	
-	public synchronized void shutdownPredictionQueue() throws InterruptedException {
-	
-		for (int i = 0; i < _predictionResultThreads; i++) {
-			_predictionResultFuture[i].cancel(true);
+	public synchronized void shutdownPredictionQueue() throws InterruptedException{
+		try{
+			for (int i = 0; i < _predictionResultThreads; i++) {
+				_predictionResultTask[i].notifyShutdown();
+				_predictionResultFuture[i].cancel(true);
+			}
 		}
-		if(_predictionExecutorService != null){
-			_predictionExecutorService.shutdownNow();
-			_predictionExecutorService.awaitTermination(10, TimeUnit.SECONDS);
+		catch (Exception e){
+			_log.error("Read thread did not complete cleanly: " + e.getMessage());
+		}
+		finally{
+			if(_predictionExecutorService != null){
+				_predictionExecutorService.shutdownNow();
+				_predictionExecutorService.awaitTermination(10, TimeUnit.SECONDS);
+			}
 		}
 	}
-	
 	
 	public void reinitializePredictionQueue() {
 		try{
@@ -180,13 +186,14 @@ public class QueuePredictionIntegrationServiceImpl extends
     	private int predictionRecordCount = 0;
     	private int predictionRecordCountInterval = 2000;
     	private long predictionRecordAverageLatency = 0;
+    	private boolean _notifyShutdown = false;
     	
     	public PredictionResultTask(int threadNumber) {
     		this.threadNumber = threadNumber;
     	}
     	
     	public void run() {
-	    	while (!Thread.interrupted()) {
+	    	while (!_notifyShutdown) {
 	    		try {
 	    			 
 	    			 FeedMessage message =_predictionMessageQueue.take();
@@ -246,6 +253,10 @@ public class QueuePredictionIntegrationServiceImpl extends
 	    		 }
 	    	}
 	    	_log.error("PredictionResultTask thread loop interrupted, exiting");
+    	}
+    	
+    	public void notifyShutdown() {
+    		_notifyShutdown = true;
     	}
     	
     	private boolean enableCheckPredictionLatency() {
