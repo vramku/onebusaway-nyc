@@ -50,13 +50,15 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private static final String PREDICTION_AGE_LIMT = "display.predictionAgeLimit";
 	private static final String CHECK_PREDICTION_AGE = "display.checkPredictionAge";
 	private static final String CHECK_PREDICTION_LATENCY = "display.checkPredictionLatency";
+	private static final String PREDICTION_QUEUE_THREAD_COUNT = "tds.predictionQueueThreadCount";
+	private static final int DEFAULT_PREDICTION_QUEUE_THREAD_COUNT = 4;
 	
-	 private static final long MESSAGE_WAIT_MILLISECONDS = 1 * 1000;
+	private static final long MESSAGE_WAIT_MILLISECONDS = 1 * 1000;
 
 	private Boolean _checkPredictionAge;
 	private Boolean _checkPredictionLatency;
 	private Integer _predictionAgeLimit = 300;
-	private int _predictionResultThreads = 4;
+	private int _predictionResultThreads = DEFAULT_PREDICTION_QUEUE_THREAD_COUNT;
 
 	Date markTimestamp = new Date();
 	int processedCount = 0;
@@ -98,19 +100,28 @@ public class QueuePredictionIntegrationServiceImpl extends
 				.getConfigurationValueAsString(PREDICTION_AGE_LIMT, "300"));
 	}
 	
+	@Refreshable(dependsOn = { PREDICTION_QUEUE_THREAD_COUNT })
+	public synchronized void refreshPredictionQueueThreadCount() {
+		_predictionResultThreads = _configurationService.
+				getConfigurationValueAsInteger(PREDICTION_QUEUE_THREAD_COUNT, DEFAULT_PREDICTION_QUEUE_THREAD_COUNT);
+		reinitializePredictionQueue();
+	}
+	
 	@PostConstruct
 	@Override
 	public void setup() {
 		super.setup();
-		initializePredictionQueue();
+		refreshPredictionQueueThreadCount();
+		initializePredictionQueue();	
 	}
 	
 	@PreDestroy
 	@Override
 	public void destroy() {
-		super.destroy();
 		try{
+			_predictionMessageQueue.clear();
 			shutdownPredictionQueue();
+			super.destroy();
 		}
 		catch(InterruptedException ie){
 			_log.error("Failed to cleanly shutdown the predictionExecutorService: ", ie);
@@ -118,7 +129,7 @@ public class QueuePredictionIntegrationServiceImpl extends
 	}
 	
 	public synchronized void initializePredictionQueue(){
-		_predictionExecutorService = Executors.newFixedThreadPool(5);
+		_predictionExecutorService = Executors.newFixedThreadPool(_predictionResultThreads);
 		_predictionResultTask = new PredictionResultTask[_predictionResultThreads];
 		_predictionResultFuture = new Future<?>[_predictionResultThreads];
 		for (int i = 0; i < _predictionResultThreads; i++) {
@@ -128,19 +139,17 @@ public class QueuePredictionIntegrationServiceImpl extends
 		}
 	}
 	
-	public void shutdownPredictionQueue() throws InterruptedException{
-		try{
-			for (int i = 0; i < _predictionResultThreads; i++) {
-				_predictionResultTask[i].notifyShutdown();
-				_predictionResultFuture[i].get(1, TimeUnit.SECONDS);
-			}
+	public synchronized void shutdownPredictionQueue() throws InterruptedException {
+	
+		for (int i = 0; i < _predictionResultThreads; i++) {
+			_predictionResultFuture[i].cancel(true);
 		}
-		catch (Exception e){
-			_log.error("Read thread did not complete cleanly: " + e.getMessage());
+		if(_predictionExecutorService != null){
+			_predictionExecutorService.shutdownNow();
+			_predictionExecutorService.awaitTermination(10, TimeUnit.SECONDS);
 		}
-		_predictionExecutorService.shutdownNow();
-		_predictionExecutorService.awaitTermination(1, TimeUnit.SECONDS);
 	}
+	
 	
 	public void reinitializePredictionQueue() {
 		try{
@@ -171,17 +180,16 @@ public class QueuePredictionIntegrationServiceImpl extends
     	private int predictionRecordCount = 0;
     	private int predictionRecordCountInterval = 2000;
     	private long predictionRecordAverageLatency = 0;
-    	private boolean _notifyShutdown = false;
     	
     	public PredictionResultTask(int threadNumber) {
     		this.threadNumber = threadNumber;
     	}
     	
     	public void run() {
-	    	while (!_notifyShutdown) {
+	    	while (!Thread.interrupted()) {
 	    		try {
 	    			 
-	    			 FeedMessage message =_predictionMessageQueue.poll();
+	    			 FeedMessage message =_predictionMessageQueue.take();
 	    			 
 	    			 if(message != null){
 		    			 
@@ -238,10 +246,6 @@ public class QueuePredictionIntegrationServiceImpl extends
 	    		 }
 	    	}
 	    	_log.error("PredictionResultTask thread loop interrupted, exiting");
-    	}
-    	
-    	public void notifyShutdown() {
-    		_notifyShutdown = true;
     	}
     	
     	private boolean enableCheckPredictionLatency() {
