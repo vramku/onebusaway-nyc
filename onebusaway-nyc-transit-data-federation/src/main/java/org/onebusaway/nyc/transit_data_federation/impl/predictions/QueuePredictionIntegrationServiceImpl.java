@@ -59,12 +59,8 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private Boolean _checkPredictionLatency;
 	private Integer _predictionAgeLimit = 300;
 	private int _predictionResultThreads = DEFAULT_PREDICTION_QUEUE_THREAD_COUNT;
-
-	Date markTimestamp = new Date();
-	int processedCount = 0;
-	int _countInterval = 10000;
 	
-
+	
 	private ArrayBlockingQueue<FeedMessage> _predictionMessageQueue = new ArrayBlockingQueue<FeedMessage>(
 		      1000000);
 	
@@ -73,8 +69,6 @@ public class QueuePredictionIntegrationServiceImpl extends
 	private PredictionResultTask[] _predictionResultTask;
 	private Future<?>[] _predictionResultFuture;
 	
-
-
 	@Autowired
 	private NycTransitDataService _transitDataService;
 
@@ -110,9 +104,11 @@ public class QueuePredictionIntegrationServiceImpl extends
 	@PostConstruct
 	@Override
 	public void setup() {
-		super.setup();
-		refreshPredictionQueueThreadCount();
-		initializePredictionQueue();	
+		if(useTimePredictionsIfAvailable()){
+			super.setup();
+			refreshPredictionQueueThreadCount();
+			initializePredictionQueue();
+		}
 	}
 	
 	@PreDestroy
@@ -127,7 +123,11 @@ public class QueuePredictionIntegrationServiceImpl extends
 			_log.error("Failed to cleanly shutdown the predictionExecutorService: ", ie);
 		}
 	}
-	
+
+	public void setEnabled(boolean enabled) {
+		_enabled = enabled;
+	}
+
 	public synchronized void initializePredictionQueue(){
 		_predictionExecutorService = Executors.newFixedThreadPool(_predictionResultThreads);
 		_predictionResultTask = new PredictionResultTask[_predictionResultThreads];
