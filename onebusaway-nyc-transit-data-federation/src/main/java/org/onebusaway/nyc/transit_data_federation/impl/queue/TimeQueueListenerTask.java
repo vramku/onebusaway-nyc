@@ -46,6 +46,7 @@ public abstract class TimeQueueListenerTask extends QueueListenerTask {
   }
   
   private String disable = "false";
+  
   public void setDisable(String disable) {
     this.disable = disable;
   }
