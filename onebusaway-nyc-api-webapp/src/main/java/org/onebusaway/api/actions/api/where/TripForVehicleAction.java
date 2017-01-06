@@ -103,7 +103,7 @@ public class TripForVehicleAction extends ApiActionSupport {
     if (trip == null)
       return setResourceNotFoundResponse();
 
-    BeanFactoryV2 factory = getBeanFactoryV2(_service);
+    BeanFactoryV2 factory = getBeanFactoryV2();
     EntryWithReferencesBean<TripDetailsV2Bean> response = factory.getResponse(trip);
     return setOkResponse(response);
   }
