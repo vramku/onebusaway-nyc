@@ -218,16 +218,23 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
   private class ValidateThread implements Runnable {
     private static final int MAX_COUNT = 3600; //(5 hours at 5 second increments)
     private static final int MAX_PING_COUNT = 60; //(5 minutes at 5 second increments)
-    private static final int MAX_ERRORS = 30;
+    private static final int MAX_ERRORS = 60;
     private BundleRequest _request;
     private BundleResponse _response;
+    
     private int pingCount = 0;
     private int errorCount = 0;
     private int pollCount = 0;
+    private int maxCount;
+    private int maxPingCount;
+    private int maxErrors;
 
     public ValidateThread(BundleRequest request, BundleResponse response) {
       _request = request;
       _response = response;
+      maxCount = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxCount", MAX_COUNT);
+      maxPingCount = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxPingCount", MAX_PING_COUNT);
+      maxErrors = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxErrorsCount", MAX_ERRORS);
     }
 
     @Override
@@ -237,7 +244,7 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
       try {
         serverId = _bundleServer.start(getInstanceId());
         boolean isAlive = _bundleServer.ping(serverId);
-        while (isAlive == false && pingCount < MAX_PING_COUNT) {
+        while (isAlive == false && pingCount < maxPingCount) {
           Thread.sleep(5 * 1000);
           pingCount++;
           isAlive = _bundleServer.ping(serverId);
@@ -301,15 +308,15 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
     }
 
     private boolean isComplete(BundleResponse response) {
-      if (response == null && errorCount <= MAX_ERRORS) {
+      if (response == null && errorCount <= maxErrors) {
         errorCount++;
         return false;
-      } else if (response == null && errorCount > MAX_ERRORS) {
-        _log.error("Received " + MAX_ERRORS + " errors, bailing");
+      } else if (response == null && errorCount > maxErrors) {
+        _log.error("Received " + maxErrors + " errors, bailing");
         return true;
       } else if (response.isComplete()) {
         return true;
-      } else if (pollCount > MAX_COUNT) {
+      } else if (pollCount > maxCount) {
         _log.error("Build timed-out, bailing");
         response.addStatusMessage("Bailing due to build timeout");
         return true;
@@ -323,16 +330,21 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
   private class BuildThread implements Runnable {
     private static final int MAX_COUNT = 3600; // 5 hours at 5 second increments
     private static final int MAX_PING_COUNT = 60; // 5 minutes
-    private static final int MAX_ERRORS = 30;
+    private static final int MAX_ERRORS = 60;
     private BundleBuildRequest _request;
     private BundleBuildResponse _response;
     private int errorCount = 0;
     private int pollCount = 0;
-    
+    private int maxCount;
+    private int maxPingCount;
+    private int maxErrors;
     
     public BuildThread(BundleBuildRequest request, BundleBuildResponse response) {
       _request = request;
       _response = response;
+      maxCount = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxCount", MAX_COUNT);
+      maxPingCount = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxPingCount", MAX_PING_COUNT);
+      maxErrors = configurationService.getConfigurationValueAsInteger("admin.bundleBuild.maxErrorsCount", MAX_ERRORS);
     }
 
     @Override
@@ -343,7 +355,7 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
         serverId = _bundleServer.start(getInstanceId());
         int pingCount = 0;
         boolean isAlive = _bundleServer.ping(serverId);
-        while (isAlive == false && pingCount < MAX_PING_COUNT) {
+        while (isAlive == false && pingCount < maxPingCount) {
           Thread.sleep(5 * 1000);
           pingCount++;
           isAlive = _bundleServer.ping(serverId);
@@ -415,15 +427,15 @@ public class BundleRequestServiceImpl implements BundleRequestService, ServletCo
     }
     
     private boolean isComplete(BundleBuildResponse response) {
-      if (response == null && errorCount <= MAX_ERRORS) {
+      if (response == null && errorCount <= maxErrors) {
         errorCount++;
         return false;
-      } else if (response == null && errorCount > MAX_ERRORS) {
-        _log.error("Received " + MAX_ERRORS + " errors, bailing");
+      } else if (response == null && errorCount > maxErrors) {
+        _log.error("Received " + maxErrors + " errors, bailing");
         return true;
       } else if (response.isComplete()) {
         return true;
-      } else if (pollCount > MAX_COUNT) {
+      } else if (pollCount > maxCount) {
         _log.error("Build timed-out, bailing");
         response.addStatusMessage("Bailing due to build timeout");
         return true;
