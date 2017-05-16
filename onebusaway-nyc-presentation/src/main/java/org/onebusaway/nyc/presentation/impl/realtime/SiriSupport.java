@@ -112,8 +112,13 @@ public final class SiriSupport {
 			monitoredCallStopBean = currentVehicleTripStatus.getNextStop();
 		}
 		
-		
-		List<TimepointPredictionRecord> currentTripPredictions = nycTransitDataService.getPredictionRecordsForVehicleAndTrip(currentVehicleTripStatus.getVehicleId(), currentVehicleTripStatus);
+		List<TimepointPredictionRecord> currentTripPredictions = null;
+		//System.out.println(currentVehicleTripStatus.getVersion());
+		try{
+			currentTripPredictions = nycTransitDataService.getPredictionRecordsForVehicleAndTrip(currentVehicleTripStatus.getVehicleId(), currentVehicleTripStatus);
+		}catch(Exception e){
+			e.printStackTrace();
+		}
 		List<TimepointPredictionRecord> nextTripPredictions = null;
 
 		TripBean nextTripBean = getNextTrip(currentVehicleTripStatus, nycTransitDataService);
