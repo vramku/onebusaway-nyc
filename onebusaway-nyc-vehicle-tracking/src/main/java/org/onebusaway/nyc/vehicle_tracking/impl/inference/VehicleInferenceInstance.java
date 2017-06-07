@@ -565,7 +565,7 @@ public class VehicleInferenceInstance {
         final OperatorAssignmentItem oai = _operatorAssignmentService.getOperatorAssignmentItemForServiceDate(
             new ServiceDate(obsDate), new AgencyAndId(
                 agencyId, operatorId));
-
+        
         if (oai != null) {
           if (_runService.isValidRunId(oai.getRunId())) {
             opAssignedRunId = oai.getRunId();
@@ -586,11 +586,19 @@ public class VehicleInferenceInstance {
             return new RunResults(opAssignedRunId, results.getFuzzyMatches(),
                 results.getBestFuzzyDist(), routeIds);
           }
+          else{
+        	  _log.warn(oai.getRunId() + " is not a valid run");
+          }
+        }
+        else{
+        	_log.warn("Operator Assignment Service Item is null");
         }
       } catch (final Exception e) {
         _log.warn(e.getMessage());
       }
     }
+    
+    _log.warn("Operator Assignment call probably failed");
     /*
      * if we're here, then the op-assignment call probably failed, so just
      * return the old results

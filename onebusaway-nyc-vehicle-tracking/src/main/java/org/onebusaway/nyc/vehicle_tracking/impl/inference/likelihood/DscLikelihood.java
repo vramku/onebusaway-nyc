@@ -28,6 +28,8 @@ import org.onebusaway.nyc.vehicle_tracking.impl.particlefilter.BadProbabilityPar
 import org.onebusaway.nyc.vehicle_tracking.impl.particlefilter.SensorModelResult;
 import org.onebusaway.realtime.api.EVehiclePhase;
 import org.onebusaway.transit_data_federation.services.transit_graph.BlockTripEntry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +45,8 @@ public class DscLikelihood implements SensorModelRule {
       DestinationSignCodeService destinationSignCodeService) {
     _destinationSignCodeService = destinationSignCodeService;
   }
+  
+  private static Logger _log = LoggerFactory.getLogger(DscLikelihood.class);
 
   @Autowired
   public void setRunService(RunService runService) {
@@ -128,8 +132,12 @@ public class DscLikelihood implements SensorModelRule {
 
           if (nextTrip != null) {
             final String dsc = _destinationSignCodeService.getDestinationSignCodeForTripId(nextTrip.getTrip().getId());
-            if (dsc != null)
+            if (dsc != null){
               dscs.add(dsc);
+            }
+            else{
+            	_log.warn("unable to retreive dsc for next trip " + nextTrip.getTrip().getId());
+            }
             routes.add(nextTrip.getTrip().getRouteCollection().getId());
           }
         }
