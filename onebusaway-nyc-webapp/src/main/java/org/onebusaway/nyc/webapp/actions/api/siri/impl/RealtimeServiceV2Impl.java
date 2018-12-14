@@ -7,6 +7,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.math.BigInteger;
 
 import org.apache.commons.lang.StringUtils;
 import org.onebusaway.geospatial.model.CoordinateBounds;
@@ -177,20 +178,15 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 		Collections.sort(output, new Comparator<VehicleActivityStructure>() {
 			public int compare(VehicleActivityStructure arg0,
 					VehicleActivityStructure arg1) {
-				try {
-					SiriExtensionWrapper wrapper0 = (SiriExtensionWrapper) arg0
-							.getMonitoredVehicleJourney().getMonitoredCall()
-							.getExtensions().getAny();
-					SiriExtensionWrapper wrapper1 = (SiriExtensionWrapper) arg1
-							.getMonitoredVehicleJourney().getMonitoredCall()
-							.getExtensions().getAny();
-					return wrapper0
-							.getDistances()
-							.getDistanceFromCall()
-							.compareTo(
-									wrapper1.getDistances()
-											.getDistanceFromCall());
-				} catch (Exception e) {
+				try{
+					BigInteger distanceFromStop0 = arg0.getMonitoredVehicleJourney().getMonitoredCall()
+					.getDistanceFromStop();
+					
+					BigInteger distanceFromStop1 = arg1.getMonitoredVehicleJourney().getMonitoredCall()
+							.getDistanceFromStop();
+					
+					return distanceFromStop0.compareTo(distanceFromStop1);
+				} catch(Exception e){
 					return -1;
 				}
 			}
@@ -272,6 +268,7 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 
 			TripStatusBean statusBeanForCurrentTrip = adBean.getTripStatus();
 			TripBean tripBeanForAd = adBean.getTrip();
+			final RouteBean routeBean = tripBeanForAd.getRoute();
 
 			if (statusBeanForCurrentTrip == null)
 				continue;
@@ -279,6 +276,10 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 			if (!_presentationService.include(statusBeanForCurrentTrip)
 					|| !_presentationService.include(adBean,
 							statusBeanForCurrentTrip))
+				continue;
+
+			if(!_nycTransitDataService.stopHasRevenueServiceOnRoute((routeBean.getAgency()!=null?routeBean.getAgency().getId():null),
+					stopId, routeBean.getId(), adBean.getTrip().getDirectionId()))
 				continue;
 
 			MonitoredStopVisitStructure stopVisit = new MonitoredStopVisitStructure();
@@ -297,26 +298,27 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 			MonitoredVehicleJourneyStructure mvjourney = new MonitoredVehicleJourneyStructure();
 			stopVisit.setMonitoredVehicleJourney(mvjourney);
 			
+			
+		// FILTERS
+      AgencyAndId thisRouteId = AgencyAndIdLibrary
+          .convertFromString(tripBeanForAd.getRoute().getId());
+     
+      String thisDirectionId = tripBeanForAd.getDirectionId();
+
+      if (routeIds.size() > 0 && !routeIds.contains(thisRouteId))
+        continue;
+
+      if (directionId != null && !thisDirectionId.equals(directionId))
+        continue;
+      
+			
 			SiriSupportV2.fillMonitoredVehicleJourney(
 					mvjourney, tripBeanForAd,
 					statusBeanForCurrentTrip, adBean.getStop(),
 					OnwardCallsMode.STOP_MONITORING, _presentationService,
 					_nycTransitDataService, maximumOnwardCalls,
 					timePredictionRecords, detailLevel, currentTime, filters);
-			
-			
-			// FILTERS
-			AgencyAndId thisRouteId = AgencyAndIdLibrary
-					.convertFromString(mvjourney.getLineRef().getValue());
-			String thisDirectionId = mvjourney.getDirectionRef().getValue();
 
-			if (routeIds.size() > 0 && !routeIds.contains(thisRouteId))
-				continue;
-
-			if (directionId != null && !thisDirectionId.equals(directionId))
-				continue;
-			
-			
 			// Monitored Stop Visits
 			Map<String, MonitoredStopVisitStructure> visitsMap = new HashMap<String, MonitoredStopVisitStructure>();
 			
@@ -368,20 +370,15 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 		Collections.sort(output, new Comparator<MonitoredStopVisitStructure>() {
 			public int compare(MonitoredStopVisitStructure arg0,
 					MonitoredStopVisitStructure arg1) {
-				try {
-					SiriExtensionWrapper wrapper0 = (SiriExtensionWrapper) arg0
-							.getMonitoredVehicleJourney().getMonitoredCall()
-							.getExtensions().getAny();
-					SiriExtensionWrapper wrapper1 = (SiriExtensionWrapper) arg1
-							.getMonitoredVehicleJourney().getMonitoredCall()
-							.getExtensions().getAny();
-					return wrapper0
-							.getDistances()
-							.getDistanceFromCall()
-							.compareTo(
-									wrapper1.getDistances()
-											.getDistanceFromCall());
-				} catch (Exception e) {
+				try{
+					BigInteger distanceFromStop0 = arg0.getMonitoredVehicleJourney().getMonitoredCall()
+					.getDistanceFromStop();
+					
+					BigInteger distanceFromStop1 = arg1.getMonitoredVehicleJourney().getMonitoredCall()
+							.getDistanceFromStop();
+					
+					return distanceFromStop0.compareTo(distanceFromStop1);
+				} catch(Exception e){
 					return -1;
 				}
 			}
@@ -582,6 +579,11 @@ public class RealtimeServiceV2Impl implements RealtimeServiceV2 {
 			if (routeId != null
 					&& !adBean.getTrip().getRoute().getId().equals(routeId))
 				continue;
+
+			// check for non-revenue stops
+			if(!_nycTransitDataService.stopHasRevenueServiceOnRoute(statusBean.getActiveTrip().getRoute().getAgency().getId(),stopId, routeId, statusBean.getActiveTrip().getDirectionId())){
+				continue;
+			}
 
 			return true;
 		}

@@ -17,11 +17,10 @@ package org.onebusaway.nyc.presentation.impl.realtime;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.Month;
+import java.util.*;
 
 import org.apache.commons.lang.StringUtils;
 
@@ -31,6 +30,7 @@ import org.onebusaway.nyc.presentation.service.realtime.PresentationService;
 import org.onebusaway.nyc.siri.support.SiriDistanceExtension;
 import org.onebusaway.nyc.siri.support.SiriExtensionWrapper;
 import org.onebusaway.nyc.transit_data.services.NycTransitDataService;
+import org.onebusaway.nyc.util.configuration.ConfigurationService;
 import org.onebusaway.realtime.api.OccupancyStatus;
 import org.onebusaway.realtime.api.TimepointPredictionRecord;
 import org.onebusaway.realtime.api.VehicleOccupancyRecord;
@@ -69,6 +69,12 @@ import uk.org.siri.siri.VehicleRefStructure;
 import uk.org.siri.siri.OccupancyEnumeration;
 
 public final class SiriSupport {
+
+	private ConfigurationService _configurationService;
+
+	public SiriSupport(ConfigurationService configurationService){
+		_configurationService = configurationService;
+	}
 
 	public enum OnwardCallsMode {
 		VEHICLE_MONITORING,
@@ -111,8 +117,11 @@ public final class SiriSupport {
 			TripBean framedJourneyTripBean, TripStatusBean currentVehicleTripStatus, StopBean monitoredCallStopBean, OnwardCallsMode onwardCallsMode,
 			PresentationService presentationService, NycTransitDataService nycTransitDataService,
 			int maximumOnwardCalls, long responseTimestamp) {
-		BlockInstanceBean blockInstance =
-					nycTransitDataService.getBlockInstance(currentVehicleTripStatus.getActiveTrip().getBlockId(), currentVehicleTripStatus.getServiceDate());
+
+		BlockInstanceBean blockInstance = nycTransitDataService
+				.getBlockInstance(currentVehicleTripStatus.getActiveTrip()
+						.getBlockId(), currentVehicleTripStatus
+						.getServiceDate());
 
 		List<BlockTripBean> blockTrips = blockInstance.getBlockConfiguration().getTrips();
 
@@ -124,10 +133,15 @@ public final class SiriSupport {
 		List<TimepointPredictionRecord> currentTripPredictions = nycTransitDataService.getPredictionRecordsForVehicleAndTripStatus(currentVehicleTripStatus.getVehicleId(), currentVehicleTripStatus);
 		List<TimepointPredictionRecord> nextTripPredictions = null;
 
-		TripBean nextTripBean = getNextTrip(currentVehicleTripStatus, nycTransitDataService);
-		if(nextTripBean != null){
-			// TODO!  Next trip support!
-//			nextTripPredictions = nycTransitDataService.getPredictionRecordsForVehicleAndTrip(currentVehicleTripStatus.getVehicleId(), );
+		TripBean nextTripBean = null;
+		if(_configurationService != null &&
+				Boolean.parseBoolean(_configurationService.getConfigurationValueAsString(
+						"display.showNextTripPredictions", "false"))) {
+			nextTripBean = getNextTrip(currentVehicleTripStatus, nycTransitDataService);
+			if (nextTripBean != null) {
+				// TODO!  Next trip support!
+				nextTripPredictions = nycTransitDataService.getPredictionRecordsForVehicleAndTrip(currentVehicleTripStatus.getVehicleId(), nextTripBean.getId());
+			}
 		}
 		
 		LineRefStructure lineRef = new LineRefStructure();
@@ -398,6 +412,16 @@ public final class SiriSupport {
 			}
 
 			for(BlockStopTimeBean stopTime : blockTrip.getBlockStopTimes()) {
+				// check for non-revenue stops for onward calls
+				if(currentVehicleTripStatus.getActiveTrip().getRoute() != null) {
+					String agencyId = currentVehicleTripStatus.getActiveTrip().getRoute().getAgency().getId();
+					String routeId = currentVehicleTripStatus.getActiveTrip().getRoute().getId();
+					String directionId = currentVehicleTripStatus.getActiveTrip().getDirectionId();
+					String stopId  = stopTime.getStopTime().getStop().getId();
+					if (!nycTransitDataService.stopHasRevenueServiceOnRoute(agencyId, stopId, routeId, directionId)){
+						continue;
+					}
+				}
 
 				// block trip stops away--on this trip, only after we've passed the stop, 
 				// on future trips, count always.
@@ -421,7 +445,7 @@ public final class SiriSupport {
 								stopTime.getDistanceAlongBlock() - blockTrip.getDistanceAlongBlock(), 
 								stopTime.getDistanceAlongBlock() - distanceOfVehicleAlongBlock, 
 								blockTripStopsAfterTheVehicle - 1,
-								stopLevelPredictions.get(stopPredictionKey), responseTimestamp));
+								stopLevelPredictions.get(stopPredictionKey), responseTimestamp, stopTime.getStopTime().getArrivalTime()));
 
 				onwardCallsAdded++;
 
@@ -499,7 +523,7 @@ public final class SiriSupport {
 										stopTime.getDistanceAlongBlock() - distanceOfVehicleAlongBlock, 
 										visitNumber, blockTripStopsAfterTheVehicle - 1,
 										stopLevelPredictions.get(stopPredictionKey),
-										responseTimestamp));
+										responseTimestamp, stopTime.getStopTime().getArrivalTime()));
 
 					}
 
@@ -587,10 +611,10 @@ public final class SiriSupport {
 		}
 	}
 
-	private static OnwardCallStructure getOnwardCallStructure(StopBean stopBean, 
-			PresentationService presentationService, 
-			double distanceOfCallAlongTrip, double distanceOfVehicleFromCall, int index,
-			SiriSupportPredictionTimepointRecord prediction, long responseTimestamp) {
+	private static OnwardCallStructure getOnwardCallStructure(StopBean stopBean,
+															  PresentationService presentationService,
+															  double distanceOfCallAlongTrip, double distanceOfVehicleFromCall, int index,
+															  SiriSupportPredictionTimepointRecord prediction, long responseTimestamp, int arrivalTime) {
 
 		OnwardCallStructure onwardCallStructure = new OnwardCallStructure();
 
@@ -619,6 +643,14 @@ public final class SiriSupport {
 			}
 		}
 
+		Calendar calendar = Calendar.getInstance(); // gets a calendar using the default time zone and locale.
+		int year = calendar.get(Calendar.YEAR);
+		int month = calendar.get(Calendar.MONTH);
+		int day = calendar.get(Calendar.DATE);
+		calendar.set(year, month, day, 0, 0, 0);
+		calendar.add(Calendar.SECOND, arrivalTime);
+		onwardCallStructure.setAimedArrivalTime(calendar.getTime());
+
 		// siri extensions
 		SiriExtensionWrapper wrapper = new SiriExtensionWrapper();
 		ExtensionsStructure distancesExtensions = new ExtensionsStructure();
@@ -640,10 +672,10 @@ public final class SiriSupport {
 		return onwardCallStructure;
 	}
 
-	private MonitoredCallStructure getMonitoredCallStructure(StopBean stopBean, 
-			PresentationService presentationService, 
-			double distanceOfCallAlongTrip, double distanceOfVehicleFromCall, int visitNumber, int index,
-			SiriSupportPredictionTimepointRecord prediction, long responseTimestamp) {
+	private MonitoredCallStructure getMonitoredCallStructure(StopBean stopBean,
+															 PresentationService presentationService,
+															 double distanceOfCallAlongTrip, double distanceOfVehicleFromCall, int visitNumber, int index,
+															 SiriSupportPredictionTimepointRecord prediction, long responseTimestamp, int arrivalTime) {
 
 		MonitoredCallStructure monitoredCallStructure = new MonitoredCallStructure();
 		monitoredCallStructure.setVisitNumber(BigInteger.valueOf(visitNumber));
@@ -673,6 +705,14 @@ public final class SiriSupport {
 			}
 			
 		}
+
+		Calendar calendar = Calendar.getInstance(); // gets a calendar using the default time zone and locale.
+		int year = calendar.get(Calendar.YEAR);
+		int month = calendar.get(Calendar.MONTH);
+		int day = calendar.get(Calendar.DATE);
+		calendar.set(year, month, day, 0, 0, 0);
+		calendar.add(Calendar.SECOND, arrivalTime);
+		monitoredCallStructure.setAimedArrivalTime(calendar.getTime());
 		
 		// siri extensions
 		SiriExtensionWrapper wrapper = new SiriExtensionWrapper();
